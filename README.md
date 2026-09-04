@@ -124,6 +124,16 @@ gh api -X PUT repos/<owner>/<repo>/branches/main/protection \
 check counts — so a stale approval on an old, safe schema can't sneak a since-broken
 one through.
 
+> **Gotcha worth knowing:** the workflow does *not* filter on `paths: schemas/**`,
+> even though the check itself is only ever about schema files. A required status
+> check that's path-filtered simply never runs — and never posts a result — on a PR
+> that doesn't touch that path, which leaves branch protection waiting forever on a
+> check that will never come. A docs-only PR would sit `BLOCKED` with no way to pass.
+> Since this check finishes in well under a minute, running it unconditionally on
+> every PR is the correct trade-off. Once `main` is protected like this, direct
+> `git push origin main` is also rejected outright (`GH006: Protected branch update
+> failed`) — every change, schema or not, goes through a PR.
+
 ## Proof: this was tested against a real PR, not just asserted
 
 This isn't a theoretical claim — it was verified against this exact repo on GitHub,
