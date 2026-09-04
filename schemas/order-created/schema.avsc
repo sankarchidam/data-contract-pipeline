@@ -2,7 +2,7 @@
   "type": "record",
   "name": "OrderCreated",
   "namespace": "com.example.orders",
-  "doc": "Emitted by the order service when a new order is created. This schema IS the data contract between the producer and every downstream consumer — it is versioned and compatibility-checked in the schema registry, not just documented here.",
+  "doc": "Candidate v2: adds a REQUIRED field with no default. This BREAKS backward compatibility — records already written under v1 have no 'shipping_address' value, so a consumer reading them with this v2 schema has no default to fall back on. The registry must reject this, and CI must fail the PR that introduces it.",
   "fields": [
     { "name": "order_id", "type": "string", "doc": "Unique order identifier (UUID)." },
     { "name": "customer_id", "type": "string", "doc": "Identifier of the customer who placed the order." },
@@ -12,6 +12,11 @@
       "name": "created_at",
       "type": { "type": "long", "logicalType": "timestamp-millis" },
       "doc": "Event creation time, epoch milliseconds."
+    },
+    {
+      "name": "shipping_address",
+      "type": "string",
+      "doc": "Required in v2, but missing from every record already produced under v1 — no default provided."
     }
   ]
 }
