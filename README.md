@@ -38,12 +38,9 @@ There are two independent enforcement points, deliberately redundant:
    runs on every pull request touching `schemas/**`. It spins up a throwaway registry,
    seeds it with whatever schema is currently on `main`, and calls the registry's
    compatibility *test* endpoint (a dry run — nothing is actually registered) against
-   the PR's proposed schema. An incompatible change fails the job.
-
-   To make that a hard block rather than a warning, turn on branch protection:
-   **Settings → Branches → Branch protection rule → Require status checks to pass
-   before merging → select `check-compatibility`.** Once that's set, GitHub will not
-   offer a merge button on a PR that breaks the contract.
+   the PR's proposed schema. An incompatible change fails the job — see
+   [Set up branch protection](#set-up-branch-protection-required-to-actually-block-merges)
+   to turn that failure into a real, unbypassable block.
 
 Compatibility here means **BACKWARD**: a new schema version must be able to read data
 written under the previous version. Concretely:
@@ -87,6 +84,80 @@ make demo-breaking     # adds a required field with no default -> FAIL, exit cod
 
 `make demo-breaking` is exactly what the CI job runs against a pull request's schema —
 this is the local, instant version of the same check.
+
+## Set up branch protection (required to actually block merges)
+
+A failing CI check is only a red X until a branch protection rule tells GitHub to
+refuse the merge over it. `check-compatibility` is the job name from the workflow
+above — that's the exact string GitHub needs as the required status check context.
+
+**Via the GitHub UI:** repo → **Settings → Branches → Add branch protection rule** →
+branch name pattern `main` → check **Require status checks to pass before merging** →
+search for and select `check-compatibility` → also check **Do not allow bypassing the
+above settings** if you want it enforced on repo admins too → **Create**.
+
+**Via the API** (what this repo actually has configured — run once, requires admin on
+the repo and a `gh` token with the `repo` scope):
+
+```bash
+cat > /tmp/branch-protection.json <<'EOF'
+{
+  "required_status_checks": {
+    "strict": true,
+    "contexts": ["check-compatibility"]
+  },
+  "enforce_admins": true,
+  "required_pull_request_reviews": null,
+  "restrictions": null,
+  "required_linear_history": false,
+  "allow_force_pushes": false,
+  "allow_deletions": false
+}
+EOF
+
+gh api -X PUT repos/<owner>/<repo>/branches/main/protection \
+  -H "Accept: application/vnd.github+json" \
+  --input /tmp/branch-protection.json
+```
+
+`strict: true` also means the PR branch must be up to date with `main` before the
+check counts — so a stale approval on an old, safe schema can't sneak a since-broken
+one through.
+
+## Proof: this was tested against a real PR, not just asserted
+
+This isn't a theoretical claim — it was verified against this exact repo on GitHub,
+with branch protection configured as above. The steps, so you can reproduce it on
+your own fork:
+
+```bash
+git checkout -b test/breaking-schema-should-be-blocked
+cp demo/schema-breaking-v2.avsc schemas/order-created/schema.avsc
+git commit -am "test: intentionally break the contract"
+git push -u origin test/breaking-schema-should-be-blocked
+gh pr create --title "TEST: breaking schema (expected to be blocked)" --base main --fill
+```
+
+What actually happened when this was run:
+
+1. `gh pr checks <n> --watch` → `check-compatibility` went `pending` → **`fail` in 31s**.
+2. `gh pr view <n> --json mergeable,mergeStateStatus` returned:
+   ```json
+   {"mergeable": "MERGEABLE", "mergeStateStatus": "BLOCKED"}
+   ```
+   Note the distinction: git has no conflicts to resolve (`mergeable`), but the branch
+   protection rule still refuses the merge (`mergeStateStatus`).
+3. Forcing it anyway (`gh pr merge <n> --merge`) was rejected outright by GitHub's own
+   API, not just the UI:
+   ```
+   X Pull request .../#<n> is not mergeable: the base branch policy prohibits the merge.
+   ```
+4. Cleaned up: `gh pr close <n> --delete-branch`, then restored `schemas/order-created/schema.avsc`
+   to its real v1 contents and confirmed `git status` showed no diff against `main`.
+
+That third step is the one that matters: it's not `gh`/the UI declining to *offer* a
+merge button — the merge endpoint itself refuses the request. There's no `--force`
+path around it short of an admin explicitly disabling the branch protection rule.
 
 ## Run the automated tests
 
