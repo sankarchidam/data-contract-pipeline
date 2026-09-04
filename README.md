@@ -6,14 +6,20 @@ consumer cannot be pushed** — not by convention, but because two independent
 mechanisms actively block it.
 
 ```
- producer ──(Avro, schema id N)──▶ Kafka topic ──▶ consumer
-     │                                                  │
-     └──────────── register / resolve schema ───────────┘
-                          │
-                    Apicurio Registry
+                                          ┌──▶ consumer          (dynamic reader schema)
+ producer ──(Avro, schema id N)──▶ Kafka topic
+     │                                    └──▶ consumer-legacy   (frozen to the v1 reader schema)
+     └──────────── register / resolve schema ───────────┐
+                          │                              │
+                    Apicurio Registry ────────────────────
                 (BACKWARD compatibility rule
                  on subject orders.order-created-value)
 ```
+
+`consumer` and `consumer-legacy` are independent consumer groups reading the same
+topic — each gets its own full copy of every message. `consumer-legacy` exists
+specifically to prove the other half of what BACKWARD compatibility buys you: see
+[Second consumer: proving compatibility, not just blocking incompatibility](#second-consumer-proving-compatibility-not-just-blocking-incompatibility).
 
 - **Broker:** Apache Kafka, KRaft mode (no ZooKeeper), official `apache/kafka` image.
 - **Schema registry:** [Apicurio Registry](https://www.apicur.io/registry/) (Apache 2.0), via its
@@ -61,13 +67,13 @@ first two rows.
 Requires Docker with Compose v2 (`docker compose ...`, not the old standalone `docker-compose`).
 
 ```bash
-make up      # builds and starts kafka, the registry, the topic, and both services
-make logs    # tail the producer/consumer output
+make up      # builds and starts kafka, the registry, the topic, the producer, and both consumers
+make logs    # tail the producer/consumer/consumer-legacy output
 make down    # stop everything
 ```
 
-You should see the producer emitting `OrderCreated` events every 2 seconds and the
-consumer logging each one it reads back out, plus a running total.
+You should see the producer emitting `OrderCreated` events every 2 seconds and both
+consumers logging each one they read back out, plus a running total each.
 
 Apicurio's web console is at http://localhost:8080 — open **Artifacts** to see the
 registered `orders.order-created-value` subject and its compatibility rule.
@@ -84,6 +90,57 @@ make demo-breaking     # adds a required field with no default -> FAIL, exit cod
 
 `make demo-breaking` is exactly what the CI job runs against a pull request's schema —
 this is the local, instant version of the same check.
+
+## Second consumer: proving compatibility, not just blocking incompatibility
+
+Everything so far demonstrates the registry *rejecting* a breaking change. That's
+only half of what a compatibility rule buys you. The other half — the actual payoff
+— is that a **compatible** change can ship without coordinating a synchronized
+redeploy of every consumer. [`consumer-legacy/`](consumer-legacy/) exists to prove
+that half live, not just assert it.
+
+`consumer-legacy` is a stand-in for a consumer team that built against the v1
+contract and never redeployed. Unlike `consumer/`, which asks the registry to
+resolve whatever schema each message was actually written with, `consumer-legacy`
+passes an explicit, frozen v1 schema
+([`consumer-legacy/reader-schema-v1.avsc`](consumer-legacy/reader-schema-v1.avsc),
+baked into its own image, deliberately never wired to the live `schemas/` directory)
+as its **reader** schema to `AvroDeserializer`. That one argument is what pins it:
+`confluent-kafka` then always resolves incoming payloads against that fixed schema,
+regardless of which version the producer wrote with — this is standard Avro
+schema resolution (`fastavro.schemaless_reader(payload, writer_schema, reader_schema)`
+under the hood), not anything special-cased for this repo.
+
+Run the live proof:
+
+```bash
+make demo-evolve-live
+```
+
+This script:
+1. Swaps the live contract to [`demo/schema-compatible-v2.avsc`](demo/schema-compatible-v2.avsc)
+   (adds optional `discount_code`, default `null`) and rebuilds/restarts **only** the producer.
+2. Waits for a few v2-shaped messages to flow.
+3. Prints the tail of both consumers' logs.
+4. Restores the original v1 contract on exit (success or failure) and confirms
+   `git diff` shows no change.
+
+What actually happened running it against this repo — the same `order_id` read by
+both consumer groups off the same topic:
+
+```
+consumer         | ... order_id=680f3b46-... | fields=['amount','created_at','currency','customer_id','discount_code','order_id']
+consumer-legacy  | ... order_id=680f3b46-... | fields=['amount','created_at','currency','customer_id','order_id']
+```
+
+Identical bytes on the wire, two different reader schemas, zero errors on either
+side. `consumer-legacy`'s code and image never changed — that's the whole point:
+a compatible schema change doesn't require every consumer to redeploy in lockstep.
+
+(If you run `make demo-evolve-live` more than once in the same session, both
+consumers' logs will include earlier v1/v2 flips too, since each is replaying
+topic history from `earliest` under its own consumer group. That's expected — for
+a single clean before/after, `make clean && make up` first.)
 
 ## Set up branch protection (required to actually block merges)
 
@@ -183,14 +240,16 @@ they should.
 ## Project layout
 
 ```
-schemas/order-created/schema.avsc   the data contract (v1, currently live)
-demo/                                worked compatible/breaking v2 examples, not wired into the pipeline
-producer/                            publishes OrderCreated events
-consumer/                            reads them back, Avro-deserialized against the registry
-scripts/register_schema.py           register a schema + set a subject's compatibility rule
-scripts/check_compatibility.py       the CI gate: test a candidate schema, don't register it
-.github/workflows/data-contract.yml  runs the gate on every PR touching schemas/**
-tests/                                pytest wrapper around the same gate, for local use
+schemas/order-created/schema.avsc      the data contract (v1, currently live)
+demo/                                   worked compatible/breaking v2 examples, not wired into the pipeline
+producer/                               publishes OrderCreated events
+consumer/                               reads them back with a dynamic (latest) reader schema
+consumer-legacy/                        reads the same topic frozen to the v1 reader schema -- proves compatibility live
+scripts/register_schema.py              register a schema + set a subject's compatibility rule
+scripts/check_compatibility.py          the CI gate: test a candidate schema, don't register it
+scripts/demo_live_evolution.sh          evolves the live contract, shows both consumers side by side, restores it
+.github/workflows/data-contract.yml     runs the gate on every PR (unfiltered by path, see below)
+tests/                                   pytest wrapper around the same gate, for local use
 ```
 
 ## Changing the contract for real

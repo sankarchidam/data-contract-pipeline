@@ -109,3 +109,25 @@ services:
       TOPIC_NAME: orders.order-created
       GROUP_ID: order-created-consumer
     restart: on-failure
+
+  # --- Legacy consumer: frozen to the v1 reader schema, never redeployed ---
+  # its own consumer group, so it gets an independent full copy of the topic,
+  # and its own image that never depends on schemas/ -- see consumer-legacy/.
+  consumer-legacy:
+    build:
+      context: .
+      dockerfile: consumer-legacy/Dockerfile
+    container_name: consumer-legacy
+    depends_on:
+      kafka:
+        condition: service_healthy
+      init-topic:
+        condition: service_completed_successfully
+      registry-setup:
+        condition: service_completed_successfully
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
+      TOPIC_NAME: orders.order-created
+      GROUP_ID: order-created-consumer-legacy-v1
+    restart: on-failure

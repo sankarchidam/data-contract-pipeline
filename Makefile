@@ -1,4 +1,4 @@
-.PHONY: up down logs ps test demo-compatible demo-breaking clean
+.PHONY: up down logs ps test demo-compatible demo-breaking demo-evolve-live clean
 
 up:
 	docker compose up --build -d
@@ -11,7 +11,7 @@ down:
 	docker compose down
 
 logs:
-	docker compose logs -f producer consumer
+	docker compose logs -f producer consumer consumer-legacy
 
 ps:
 	docker compose ps
@@ -37,6 +37,12 @@ demo-breaking:
 	python scripts/check_compatibility.py orders.order-created-value \
 		demo/schema-breaking-v2.avsc \
 		--registry-url http://localhost:8080/apis/ccompat/v7
+
+# Live proof of BACKWARD compatibility: evolve the running contract with a compatible
+# change and show the frozen-schema legacy consumer keeps working untouched, while
+# the dynamic consumer picks up the new field. Restores the original schema on exit.
+demo-evolve-live:
+	./scripts/demo_live_evolution.sh
 
 clean:
 	docker compose down -v --remove-orphans

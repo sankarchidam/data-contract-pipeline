@@ -54,13 +54,14 @@ def main() -> None:
             count += 1
             running_total += order["amount"]
             log.info(
-                "consumed order_id=%s customer=%s amount=%.2f %s | count=%d running_total=%.2f",
+                "consumed order_id=%s customer=%s amount=%.2f %s | count=%d running_total=%.2f | fields=%s",
                 order["order_id"],
                 order["customer_id"],
                 order["amount"],
                 order["currency"],
                 count,
                 running_total,
+                sorted(order.keys()),
             )
     except KeyboardInterrupt:
         pass
