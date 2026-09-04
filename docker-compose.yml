@@ -1,0 +1,111 @@
+services:
+  # --- Broker -----------------------------------------------------------
+  kafka:
+    image: apache/kafka:latest
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      # Internal listener for containers on the compose network (kafka:29092),
+      # external listener for tools running on the host (localhost:9092).
+      KAFKA_LISTENERS: PLAINTEXT://kafka:29092,CONTROLLER://kafka:9093,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server kafka:29092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 20s
+
+  # --- Schema registry (data contract enforcement point) -----------------
+  schema-registry:
+    image: apicurio/apicurio-registry:3.3.2
+    container_name: schema-registry
+    ports:
+      - "8080:8080"
+
+  # --- One-shot: create the topic ----------------------------------------
+  init-topic:
+    image: apache/kafka:latest
+    container_name: init-topic
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092
+        --create --if-not-exists --topic orders.order-created
+        --partitions 3 --replication-factor 1
+
+  # --- One-shot: register the v1 contract + lock in BACKWARD compatibility
+  registry-setup:
+    build:
+      context: .
+      dockerfile: scripts/Dockerfile
+    container_name: registry-setup
+    depends_on:
+      - schema-registry
+    restart: "no"
+    environment:
+      SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
+    command:
+      - "python"
+      - "scripts/register_schema.py"
+      - "orders.order-created-value"
+      - "schemas/order-created/schema.avsc"
+      - "--registry-url"
+      - "http://schema-registry:8080/apis/ccompat/v7"
+      - "--set-compatibility"
+      - "BACKWARD"
+      - "--wait"
+
+  # --- Producer ------------------------------------------------------------
+  producer:
+    build:
+      context: .
+      dockerfile: producer/Dockerfile
+    container_name: producer
+    depends_on:
+      kafka:
+        condition: service_healthy
+      init-topic:
+        condition: service_completed_successfully
+      registry-setup:
+        condition: service_completed_successfully
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
+      TOPIC_NAME: orders.order-created
+    restart: on-failure
+
+  # --- Consumer ------------------------------------------------------------
+  consumer:
+    build:
+      context: .
+      dockerfile: consumer/Dockerfile
+    container_name: consumer
+    depends_on:
+      kafka:
+        condition: service_healthy
+      init-topic:
+        condition: service_completed_successfully
+      registry-setup:
+        condition: service_completed_successfully
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
+      TOPIC_NAME: orders.order-created
+      GROUP_ID: order-created-consumer
+    restart: on-failure

@@ -1,0 +1,23 @@
+{
+  "type": "record",
+  "name": "OrderCreated",
+  "namespace": "com.example.orders",
+  "doc": "Candidate v2: adds an OPTIONAL field with a default. This is backward compatible — a consumer still running the v1 reader schema can read v2-produced records (it just ignores the new field), and the new schema can read v1 records (it falls back to the default). Safe to ship.",
+  "fields": [
+    { "name": "order_id", "type": "string", "doc": "Unique order identifier (UUID)." },
+    { "name": "customer_id", "type": "string", "doc": "Identifier of the customer who placed the order." },
+    { "name": "amount", "type": "double", "doc": "Order total, in the given currency." },
+    { "name": "currency", "type": "string", "doc": "ISO 4217 currency code, e.g. USD." },
+    {
+      "name": "created_at",
+      "type": { "type": "long", "logicalType": "timestamp-millis" },
+      "doc": "Event creation time, epoch milliseconds."
+    },
+    {
+      "name": "discount_code",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Optional promo/discount code applied to the order. New in v2."
+    }
+  ]
+}

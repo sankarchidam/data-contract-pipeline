@@ -1,0 +1,55 @@
+name: Data Contract Check
+
+# Blocks any pull request that changes schemas/** and would break consumers still
+# running the schema currently on `main`. Pair this with a branch-protection rule
+# ("Require status checks to pass" -> select the `check-compatibility` job) so it's
+# not just advisory -- GitHub will refuse to let the PR merge until it's green.
+on:
+  pull_request:
+    paths:
+      - "schemas/**"
+  push:
+    branches: [main]
+    paths:
+      - "schemas/**"
+
+jobs:
+  check-compatibility:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out PR branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install script dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Start a throwaway schema registry
+        run: docker compose up -d schema-registry
+
+      - name: Fetch the schema currently on main
+        run: git fetch origin main --depth=1
+
+      - name: Seed the registry with main's contract version
+        run: |
+          git show origin/main:schemas/order-created/schema.avsc > /tmp/main-schema.avsc
+          python scripts/register_schema.py \
+            orders.order-created-value /tmp/main-schema.avsc \
+            --registry-url http://localhost:8080/apis/ccompat/v7 \
+            --set-compatibility BACKWARD \
+            --wait
+
+      - name: Check this branch's schema against the contract
+        run: |
+          python scripts/check_compatibility.py \
+            orders.order-created-value \
+            schemas/order-created/schema.avsc \
+            --registry-url http://localhost:8080/apis/ccompat/v7
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

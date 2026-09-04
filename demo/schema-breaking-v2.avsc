@@ -1,0 +1,22 @@
+{
+  "type": "record",
+  "name": "OrderCreated",
+  "namespace": "com.example.orders",
+  "doc": "Candidate v2: adds a REQUIRED field with no default. This BREAKS backward compatibility — records already written under v1 have no 'shipping_address' value, so a consumer reading them with this v2 schema has no default to fall back on. The registry must reject this, and CI must fail the PR that introduces it.",
+  "fields": [
+    { "name": "order_id", "type": "string", "doc": "Unique order identifier (UUID)." },
+    { "name": "customer_id", "type": "string", "doc": "Identifier of the customer who placed the order." },
+    { "name": "amount", "type": "double", "doc": "Order total, in the given currency." },
+    { "name": "currency", "type": "string", "doc": "ISO 4217 currency code, e.g. USD." },
+    {
+      "name": "created_at",
+      "type": { "type": "long", "logicalType": "timestamp-millis" },
+      "doc": "Event creation time, epoch milliseconds."
+    },
+    {
+      "name": "shipping_address",
+      "type": "string",
+      "doc": "Required in v2, but missing from every record already produced under v1 — no default provided."
+    }
+  ]
+}

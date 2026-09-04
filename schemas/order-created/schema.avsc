@@ -1,0 +1,17 @@
+{
+  "type": "record",
+  "name": "OrderCreated",
+  "namespace": "com.example.orders",
+  "doc": "Emitted by the order service when a new order is created. This schema IS the data contract between the producer and every downstream consumer — it is versioned and compatibility-checked in the schema registry, not just documented here.",
+  "fields": [
+    { "name": "order_id", "type": "string", "doc": "Unique order identifier (UUID)." },
+    { "name": "customer_id", "type": "string", "doc": "Identifier of the customer who placed the order." },
+    { "name": "amount", "type": "double", "doc": "Order total, in the given currency." },
+    { "name": "currency", "type": "string", "doc": "ISO 4217 currency code, e.g. USD." },
+    {
+      "name": "created_at",
+      "type": { "type": "long", "logicalType": "timestamp-millis" },
+      "doc": "Event creation time, epoch milliseconds."
+    }
+  ]
+}
