@@ -1,0 +1,17 @@
+{
+  "type": "record",
+  "name": "OrderCreated",
+  "namespace": "com.example.orders",
+  "doc": "Frozen copy of the v1 contract, baked into this consumer's image at build time. This file is deliberately NOT the same file as schemas/order-created/schema.avsc and is never updated when the live contract evolves — it stands in for a consumer team that built once against v1 and hasn't redeployed since. That is the whole point of this service: prove that BACKWARD compatibility means this file never has to change for the pipeline to keep working.",
+  "fields": [
+    { "name": "order_id", "type": "string", "doc": "Unique order identifier (UUID)." },
+    { "name": "customer_id", "type": "string", "doc": "Identifier of the customer who placed the order." },
+    { "name": "amount", "type": "double", "doc": "Order total, in the given currency." },
+    { "name": "currency", "type": "string", "doc": "ISO 4217 currency code, e.g. USD." },
+    {
+      "name": "created_at",
+      "type": { "type": "long", "logicalType": "timestamp-millis" },
+      "doc": "Event creation time, epoch milliseconds."
+    }
+  ]
+}
