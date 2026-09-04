@@ -1,17 +1,19 @@
 name: Data Contract Check
 
-# Blocks any pull request that changes schemas/** and would break consumers still
-# running the schema currently on `main`. Pair this with a branch-protection rule
-# ("Require status checks to pass" -> select the `check-compatibility` job) so it's
-# not just advisory -- GitHub will refuse to let the PR merge until it's green.
+# Blocks any pull request that would break consumers still running the schema
+# currently on `main`. Pair this with a branch-protection rule ("Require status
+# checks to pass" -> select the `check-compatibility` job) so it's not just
+# advisory -- GitHub will refuse to let the PR merge until it's green.
+#
+# Deliberately UNFILTERED by path: a required status check that's path-filtered
+# never runs (and so never reports a result) on a PR that doesn't touch that path,
+# which leaves branch protection waiting forever on a check that will never post.
+# Since this check finishes in well under a minute, running it on every PR is
+# cheaper than the alternative of a permanently-stuck merge button.
 on:
   pull_request:
-    paths:
-      - "schemas/**"
   push:
     branches: [main]
-    paths:
-      - "schemas/**"
 
 jobs:
   check-compatibility:
